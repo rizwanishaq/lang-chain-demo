@@ -1,26 +1,24 @@
 import streamlit as st
-import langchain
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.vectorstores import Chroma
-from langchain import OpenAI, VectorDBQA
+from langchain.embeddings import SentenceTransformerEmbeddings
 from langchain.chains import RetrievalQAWithSourcesChain
-import PyPDF2
-import sst
+from PyPDF2 import PdfReader
+from langchain import HuggingFaceHub
 
 
 def read_and_textify(files):
     text_list = []
     sources_list = []
     for file in files:
-        pdfReader = PyPDF2.PdfReader(file)
+        pdfReader = PdfReader(file)
+        # print("Page Number:", len(pdfReader.pages))
         for i in range(len(pdfReader.pages)):
             pageObj = pdfReader.pages[i]
             text = pageObj.extract_text()
             pageObj.clear()
             text_list.append(text)
-            sources_list.append(file.name + "_page_" + str(i))
-
+            sources_list.append(file.name + "_page_"+str(i))
     return [text_list, sources_list]
 
 
@@ -43,19 +41,25 @@ elif uploaded_files:
     documents = textify_output[0]
     sources = textify_output[1]
 
-    embeddings = OpenAIEmbeddings(openai_api_key=st.secrets["OPENAI_API_KEY"])
+    embeddings = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
 
     vStore = Chroma.from_texts(documents, embeddings, metadatas=[
                                {"source": s} for s in sources])
 
-    model_name = "gpt-3.5-turbo"
+    model_name = "tiiuae/falcon-7b-instruct"
 
     retriever = vStore.as_retriever()
     retriever.search_kwargs = {"k": 2}
 
     # initiate model
-    llm = OpenAI(model_name=model_name,
-                 openai_api_key=st.secrets["OPENAI_API_KEY"], streaming=True)
+    llm = HuggingFaceHub(
+        huggingfacehub_api_token=st.secrets["huggingfacehub_api_token"],
+        repo_id=model_name,
+        model_kwargs={
+            # "task": "text2text-generation",
+            "temperature": 0.8, "max_new_tokens": 100}
+
+    )
 
     chain = RetrievalQAWithSourcesChain.from_chain_type(
         llm=llm, chain_type="stuff", retriever=retriever)
@@ -67,11 +71,10 @@ elif uploaded_files:
         try:
             with st.spinner("model is working on it..."):
                 result = chain({"question": user_q}, return_only_outputs=True)
+                print(result)
                 st.subheader("your response: ")
                 st.write(result["answer"])
-                st.subheader("Source pages:")
-                st.write(result["sources"])
+                st.subheader('Source pages:')
+                st.write(result['sources'])
         except Exception as e:
             st.error(f"An error occured: {e}")
-            st.error(
-                "Oops, the GPT response resulted in an error: (Please try again with a different question.)")
