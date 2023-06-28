@@ -43,26 +43,22 @@ elif uploaded_files:
 
     embeddings = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
 
-    vStore = Chroma.from_texts(documents, embeddings, metadatas=[
-                               {"source": s} for s in sources])
+    embedding_store = Chroma.from_texts(documents, embeddings, metadatas=[
+        {"source": s} for s in sources])
 
     model_name = "tiiuae/falcon-7b-instruct"
-
-    retriever = vStore.as_retriever()
-    retriever.search_kwargs = {"k": 2}
 
     # initiate model
     llm = HuggingFaceHub(
         huggingfacehub_api_token=st.secrets["huggingfacehub_api_token"],
         repo_id=model_name,
         model_kwargs={
-            # "task": "text2text-generation",
             "temperature": 0.8, "max_new_tokens": 100}
 
     )
 
     chain = RetrievalQAWithSourcesChain.from_chain_type(
-        llm=llm, chain_type="stuff", retriever=retriever)
+        llm=llm, chain_type="stuff", retriever=embedding_store.as_retriever())
 
     st.header("Ask your data")
     user_q = st.text_area("Enter your questions here")
@@ -70,6 +66,11 @@ elif uploaded_files:
     if st.button("Get Response"):
         try:
             with st.spinner("model is working on it..."):
+
+                matching_docs = embedding_store.similarity_search(user_q)
+                st.subheader("Matched documents: ")
+                st.write(matching_docs)
+
                 result = chain({"question": user_q}, return_only_outputs=True)
                 print(result)
                 st.subheader("your response: ")
